@@ -352,11 +352,11 @@ def home():
     return render_template_string(HTML_TEMPLATE)
 
 
-@app.route("/encode", methods=["POST"])
+@app.route("/steganography/encode", methods=["POST"])
 def encode_route():
     if "image" not in request.files or "text" not in request.form:
         flash("Missing image or text.", "error")
-        return redirsect(url_for("home"))
+        return redirect(url_for("home"))
 
     file = request.files["image"]
     text = request.form["text"]
@@ -382,7 +382,7 @@ def encode_route():
         return redirect(url_for("home"))
 
 
-@app.route("/decode", methods=["POST"])
+@app.route("/steganography/decode", methods=["POST"])
 def decode_route():
     if "image" not in request.files:
         flash("Please upload an image.", "error")
