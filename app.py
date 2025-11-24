@@ -234,10 +234,6 @@ HTML_TEMPLATE = """
                     <span>Encode & Download Image</span>
                     <i class="fas fa-download ml-2 group-hover:translate-y-1 transition-transform"></i>
                 </button>
-                <div class="flex items-center justify-center mt-4">
-                    <div id="loading-spinner" class="loader mr-3"></div>
-                    <span id="loading-text" class="text-gray-400 text-sm hidden">Processing... this may take a moment.</span>
-                </div>
             </form>
         </div>
 
@@ -286,23 +282,56 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-    function showLoader() {
-        const spinner = document.getElementById('loading-spinner');
-        const text = document.getElementById('loading-text');
-        
-        if (!spinner) return; 
-        
-        spinner.style.display = 'block';
-        text.classList.remove('hidden');
-        
-        document.querySelectorAll('button[type="submit"]').forEach(btn => {
-            btn.disabled = true;
-            btn.classList.add('opacity-50', 'cursor-not-allowed');
-            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
-        });
+    // 1. UI: Tab Switching Logic
+    function clearResult() {
+        const resultArea = document.getElementById('result-area');
+        if (resultArea) resultArea.style.display = 'none';
     }
 
-    // LOGIC: Encode Form (WITH Client-Side Compression)
+    function switchTab(tab) {
+        const encodeBtn = document.getElementById('btn-encode');
+        const decodeBtn = document.getElementById('btn-decode');
+        const encodePanel = document.getElementById('encode-panel');
+        const decodePanel = document.getElementById('decode-panel');
+
+        clearResult();
+
+        if(tab === 'encode') {
+            encodePanel.classList.remove('hidden');
+            decodePanel.classList.add('hidden');
+            encodeBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
+            encodeBtn.classList.remove('text-gray-400');
+            decodeBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+            decodeBtn.classList.add('text-gray-400');
+        } else {
+            encodePanel.classList.add('hidden');
+            decodePanel.classList.remove('hidden');
+            decodeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
+            decodeBtn.classList.remove('text-gray-400');
+            encodeBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
+            encodeBtn.classList.add('text-gray-400');
+        }
+    }
+
+    // 2. UTILITY: Show Loading Spinner ON THE BUTTON
+    function showLoader(activeForm) {
+        // Find the submit button INSIDE the active form
+        const btn = activeForm.querySelector('button[type="submit"]');
+        
+        if (btn) {
+            // Disable button to prevent double-submit
+            btn.disabled = true;
+            btn.classList.add('opacity-75', 'cursor-not-allowed');
+            
+            // Save original text (optional, but good practice)
+            btn.dataset.originalText = btn.innerText;
+            
+            // Inject Spinner HTML directly into the button
+            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
+        }
+    }
+
+    // 3. LOGIC: Encode Form (WITH Client-Side Compression)
     const encodeForm = document.querySelector('#encode-panel form');
     if (encodeForm) {
         encodeForm.addEventListener('submit', async function(e) {
@@ -310,7 +339,9 @@ HTML_TEMPLATE = """
             
             if (fileInput.files.length > 0) {
                 e.preventDefault(); 
-                showLoader(); 
+                
+                // Show loader on THIS form
+                showLoader(this); 
                 
                 try {
                     const file = fileInput.files[0];
@@ -321,6 +352,7 @@ HTML_TEMPLATE = """
                     dataTransfer.items.add(compressedFile);
                     fileInput.files = dataTransfer.files;
                     
+                    // Resume submission
                     this.submit();
                 } catch (error) {
                     console.error("Compression failed, sending original:", error);
@@ -330,14 +362,16 @@ HTML_TEMPLATE = """
         });
     }
 
-    // LOGIC: Decode Form (NO Compression)
+    // 4. LOGIC: Decode Form (Simple Loader)
     const decodeForm = document.querySelector('#decode-panel form');
     if (decodeForm) {
         decodeForm.addEventListener('submit', function(e) {
-            showLoader();
+            // Show loader on THIS form immediately
+            showLoader(this);
         });
     }
 
+    // 5. HELPER: Image Compression
     function compressImage(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -372,41 +406,11 @@ HTML_TEMPLATE = """
             };
         });
     }
-
-    function clearResult() {
-        const resultArea = document.getElementById('result-area');
-        if (resultArea) resultArea.style.display = 'none';
-    }
-
-    function switchTab(tab) {
-        const encodeBtn = document.getElementById('btn-encode');
-        const decodeBtn = document.getElementById('btn-decode');
-        const encodePanel = document.getElementById('encode-panel');
-        const decodePanel = document.getElementById('decode-panel');
-
-        clearResult();
-
-        if(tab === 'encode') {
-            encodePanel.classList.remove('hidden');
-            decodePanel.classList.add('hidden');
-            encodeBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
-            encodeBtn.classList.remove('text-gray-400');
-            decodeBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
-            decodeBtn.classList.add('text-gray-400');
-        } else {
-            encodePanel.classList.add('hidden');
-            decodePanel.classList.remove('hidden');
-            decodeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
-            decodeBtn.classList.remove('text-gray-400');
-            encodeBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
-            encodeBtn.classList.add('text-gray-400');
-        }
-    }
     
     {% if result_text %}
         switchTab('decode');
     {% endif %}
-    </script>
+</script>
 </body>
 </html>
 """
