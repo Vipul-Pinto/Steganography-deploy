@@ -448,5 +448,8 @@ def decode_route():
 
 
 if __name__ == "__main__":
-    # Run on all interfaces for easy testing
-    app.run(host="0.0.0.0", port=5000)
+    from waitress import serve
+    print("🚀 Starting Production Server on Port 5000...")
+    # Threads=4 allows 4 people to use it at once
+    # Max request body size increased to 16MB to prevent connection drops on large images
+    serve(app, host="0.0.0.0", port=5000, threads=4, max_request_body_size=16777216)
