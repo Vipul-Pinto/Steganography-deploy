@@ -233,7 +233,7 @@ HTML_TEMPLATE = """
 
         <!-- Encode Section -->
         <div id="encode-panel" class="glass rounded-2xl p-8 shadow-2xl animate-fade-in">
-            <form action="/encode" method="post" enctype="multipart/form-data" class="space-y-6">
+            <form action="{{ url_for('encode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <!-- Image Input -->
@@ -270,7 +270,7 @@ HTML_TEMPLATE = """
 
         <!-- Decode Section -->
         <div id="decode-panel" class="glass rounded-2xl p-8 shadow-2xl hidden">
-            <form action="/decode" method="post" enctype="multipart/form-data" class="space-y-6">
+            <form action="{{ url_for('decode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">1. Upload Encoded Image</label>
