@@ -12,7 +12,7 @@ from flask import (
     redirect,
     url_for,
 )
-from flask_compress import Compress  # OPTIMIZATION: Compresses HTML/CSS
+from flask_compress import Compress  # OPTIMIZATION 1: Compresses the HTML sent to browser
 
 app = Flask(__name__)
 app.secret_key = "super_secret_stego_key"
@@ -25,7 +25,7 @@ Compress(app)  # Initialize Compression
 class SteganographyEngine:
     """
     High-Performance Steganography.
-    Optimized: Relies on Client-Side Compression for speed.
+    Optimized: Vectorized NumPy operations + Client-Side Compression.
     """
 
     HEADER_SIZE = 4
@@ -62,8 +62,8 @@ class SteganographyEngine:
         if img is None:
             raise ValueError("Could not decode image.")
 
-        # REMOVED: Backend Compression. 
-        # Reason: The JavaScript now handles this. Doing it twice wastes CPU.
+        # NOTE: No server-side compression here. 
+        # We trust the JavaScript client to have already compressed it to JPG.
 
         # 2. Prepare Payload
         text_bytes = cls.SENTINEL + text.encode("utf-8")
@@ -160,16 +160,6 @@ HTML_TEMPLATE = """
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #10b981;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            display: none;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }    
     </style>
 </head>
 <body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen text-gray-100 flex flex-col items-center py-10">
@@ -315,34 +305,32 @@ HTML_TEMPLATE = """
 
     // 2. UTILITY: Show Loading Spinner ON THE BUTTON
     function showLoader(activeForm) {
-        // Find the submit button INSIDE the active form
         const btn = activeForm.querySelector('button[type="submit"]');
-        
         if (btn) {
-            // Disable button to prevent double-submit
             btn.disabled = true;
             btn.classList.add('opacity-75', 'cursor-not-allowed');
-            
-            // Save original text (optional, but good practice)
             btn.dataset.originalText = btn.innerText;
-            
-            // Inject Spinner HTML directly into the button
             btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
         }
+    }
+
     // 3. LOGIC: Encode Form (WITH Client-Side Compression)
     const encodeForm = document.querySelector('#encode-panel form');
     if (encodeForm) {
         encodeForm.addEventListener('submit', async function(e) {
             const fileInput = this.querySelector('input[type="file"]');
+            
             if (fileInput.files.length > 0) {
                 e.preventDefault();
                 showLoader(this);
                 try {
                     const file = fileInput.files[0];
                     const compressedFile = await compressImage(file);
+                    
                     const dataTransfer = new DataTransfer();
                     dataTransfer.items.add(compressedFile);
                     fileInput.files = dataTransfer.files;
+                    
                     this.submit();
                 } catch (error) {
                     console.error("Compression failed:", error);
@@ -352,12 +340,15 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 4. LOGIC: Decode Form (Simple Loader)
+    // 4. LOGIC: Decode Form (OPTIMIZATION 3: Fixed Timing)
     const decodeForm = document.querySelector('#decode-panel form');
     if (decodeForm) {
         decodeForm.addEventListener('submit', function(e) {
-            // Show loader on THIS form immediately
-            showLoader(this);
+            // Using setTimeout allows the submit event to propagate BEFORE we disable the button
+            const form = this;
+            setTimeout(() => {
+                showLoader(form);
+            }, 10);
         });
     }
 
@@ -400,7 +391,7 @@ HTML_TEMPLATE = """
     {% if result_text %}
         switchTab('decode');
     {% endif %}
-</script>
+    </script>
 </body>
 </html>
 """
@@ -454,4 +445,6 @@ def decode_route():
 if __name__ == "__main__":
     from waitress import serve
     print("🚀 Starting Production Server on Port 5000...")
-    serve(app, host="0.0.0.0", port=5000, threads=4, max_request_body_size=16777216)
+    
+    # OPTIMIZATION 2: Increased limit to 128MB to fix "Decode not working" on large PNGs
+    serve(app, host="0.0.0.0", port=5000, threads=4, max_request_body_size=134217728)
