@@ -377,4 +377,4 @@ if __name__ == "__main__":
     from waitress import serve
 
     print("🚀 Production Server Running on Port 5000")
-    serve(app, host="0.0.0.0", port=5050, threads=6)
+    serve(app, host="0.0.0.0", port=5000, threads=6)
