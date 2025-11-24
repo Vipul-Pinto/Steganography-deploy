@@ -200,7 +200,7 @@ HTML_TEMPLATE = """
     <!-- Header -->
     <div class="text-center mb-10">
         <h1 class="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 mb-2">
-            <i class="fas fa-user-secret mr-3 text-emerald-400"></i>StegoCrypt
+            <i class="fas fa-user-secret mr-3 text-emerald-400"></i>SteganoCrypt
         </h1>
         <p class="text-gray-400">Securely hide text inside images using Bitwise LSB & XOR Encryption</p>
     </div>
