@@ -186,6 +186,16 @@ HTML_TEMPLATE = """
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #10b981; /* Emerald color */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: none; /* Hidden by default */
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }   
     </style>
 </head>
 <body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen text-gray-100 flex flex-col items-center py-10">
@@ -258,6 +268,10 @@ HTML_TEMPLATE = """
                     <span>Encode & Download Image</span>
                     <i class="fas fa-download ml-2 group-hover:translate-y-1 transition-transform"></i>
                 </button>
+                <div class="flex items-center justify-center mt-4">
+                    <div id="loading-spinner" class="loader mr-3"></div>
+                    <span id="loading-text" class="text-gray-400 text-sm hidden">Processing... this may take a moment.</span>
+                </div>
             </form>
         </div>
 
@@ -385,6 +399,19 @@ HTML_TEMPLATE = """
             });
         }
         
+        function showLoader() {
+            document.getElementById('loading-spinner').style.display = 'block';
+            document.getElementById('loading-text').classList.remove('hidden');
+            // Disable button to prevent double clicks
+            document.querySelector('button[type="submit"]').disabled = true;
+            document.querySelector('button[type="submit"]').classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
+        // Attach to forms
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', showLoader);
+        });
+        
     </script>
 </body>
 </html>
@@ -449,6 +476,7 @@ def decode_route():
 
 if __name__ == "__main__":
     from waitress import serve
+
     print("🚀 Starting Production Server on Port 5000...")
     # Threads=4 allows 4 people to use it at once
     # Max request body size increased to 16MB to prevent connection drops on large images
