@@ -23,11 +23,11 @@ app.secret_key = "super_secret_stego_key"  # Needed for flash messages
 
 class SteganographyEngine:
     """
-    High-Performance Steganography using NumPy Vectorization.
-    100x Faster than standard Python loops.
+    High-Performance Steganography with Pre-Compression.
+    1. Compresses Input -> 2. Vectorized Encoding -> 3. Output PNG
     """
 
-    HEADER_SIZE = 4  # 4 bytes for length
+    HEADER_SIZE = 4
     SENTINEL = b"##STEGO_CHECK##"
 
     @staticmethod
@@ -39,23 +39,43 @@ class SteganographyEngine:
         if not password:
             return data_bytes
         
-        # Vectorized XOR
         key = SteganographyEngine._generate_key(password)
         key_len = len(key)
         
-        # Convert data and key to numpy arrays
         data_arr = np.frombuffer(data_bytes, dtype=np.uint8)
         key_arr = np.frombuffer(key, dtype=np.uint8)
         
-        # Tile the key to match data length
         if len(data_arr) > key_len:
-            # Create a repeated key array efficiently
             full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[:len(data_arr)]
         else:
             full_key = key_arr[:len(data_arr)]
             
-        # Fast XOR
         return np.bitwise_xor(data_arr, full_key).tobytes()
+
+    @classmethod
+    def compress_image(cls, img):
+        """
+        Reduces image size BEFORE encoding to keep file size low.
+        1. Resize if larger than 1600px
+        2. Apply JPEG compression (Quality 85) in memory
+        """
+        # 1. Resize if too big
+        max_dim = 1600
+        height, width = img.shape[:2]
+        
+        if max(height, width) > max_dim:
+            scale = max_dim / max(height, width)
+            new_w, new_h = int(width * scale), int(height * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        # 2. JPEG Compression (In-Memory)
+        # We encode to JPG to drop quality, then decode back to raw pixels
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+        is_success, buffer = cv2.imencode(".jpg", img, encode_param)
+        
+        if is_success:
+            return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        return img
 
     @classmethod
     def encode(cls, image_stream, text, password):
@@ -66,35 +86,40 @@ class SteganographyEngine:
         if img is None:
             raise ValueError("Could not decode image.")
 
+        # --- NEW: COMPRESS FIRST ---
+        img = cls.compress_image(img)
+        # ---------------------------
+
         # 2. Prepare Payload
         text_bytes = cls.SENTINEL + text.encode("utf-8")
         encrypted_bytes = cls._xor_encrypt_decrypt(text_bytes, password)
 
-        # Header: Length of encrypted data
         data_len = len(encrypted_bytes)
         header = struct.pack(">I", data_len)
         full_payload = header + encrypted_bytes
 
-        # 3. Check Capacity
+        # 3. Check Capacity (Checked AFTER compression)
         total_pixels = img.size
         required_bits = len(full_payload) * 8
 
         if required_bits > total_pixels:
-            raise ValueError(f"Image too small. Need {required_bits} pixels, have {total_pixels}.")
+            raise ValueError(
+                f"Text is too long for this image (after compression). "
+                f"Need {required_bits} pixels, have {total_pixels}."
+            )
 
         # 4. Embed Bits (Vectorized)
         flat_img = img.flatten()
-        
-        # Convert bytes to bits using numpy
         payload_arr = np.frombuffer(full_payload, dtype=np.uint8)
         bits = np.unpackbits(payload_arr)
         
-        # Embed bits: Clear LSB (bitwise AND 254) then OR with bits
-        # This replaces the slow loop entirely
+        # Clear LSB and add new bits
         flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
 
         # 5. Reconstruct
         steg_img = flat_img.reshape(img.shape)
+        
+        # Must save as PNG (Lossless) to preserve the hidden bits
         is_success, buffer = cv2.imencode(".png", steg_img)
         
         if not is_success:
@@ -104,7 +129,7 @@ class SteganographyEngine:
 
     @classmethod
     def decode(cls, image_stream, password):
-        # 1. Read Image
+        # Decoding logic remains the exact same
         file_bytes = np.frombuffer(image_stream.read(), np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
@@ -113,10 +138,8 @@ class SteganographyEngine:
 
         flat_img = img.flatten()
 
-        # 2. Extract Header (Vectorized)
-        # Get first 32 bits (LSBs)
+        # Vectorized Header Extraction
         header_bits = flat_img[:32] & 1
-        # Pack bits back to bytes
         header_bytes = np.packbits(header_bits).tobytes()
 
         try:
@@ -124,24 +147,17 @@ class SteganographyEngine:
         except:
             raise ValueError("Failed to retrieve header.")
 
-        # Sanity check
         if msg_length > len(flat_img) // 8:
             raise ValueError("Detected message length is impossibly large.")
 
-        # 3. Extract Payload (Vectorized)
+        # Vectorized Payload Extraction
         start = 32
         end = 32 + (msg_length * 8)
-        
-        # Slicing the numpy array is instant
         payload_bits = flat_img[start:end] & 1
-        
-        # Convert bits to bytes instantly
         encrypted_bytes = np.packbits(payload_bits).tobytes()
 
-        # 4. Decrypt
         decrypted_bytes = cls._xor_encrypt_decrypt(encrypted_bytes, password)
 
-        # 5. Verify Sentinel
         if not decrypted_bytes.startswith(cls.SENTINEL):
             raise ValueError("Wrong password or no data found.")
 
