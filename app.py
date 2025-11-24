@@ -38,18 +38,18 @@ class SteganographyEngine:
     def _xor_encrypt_decrypt(data_bytes, password):
         if not password:
             return data_bytes
-        
+
         key = SteganographyEngine._generate_key(password)
         key_len = len(key)
-        
+
         data_arr = np.frombuffer(data_bytes, dtype=np.uint8)
         key_arr = np.frombuffer(key, dtype=np.uint8)
-        
+
         if len(data_arr) > key_len:
-            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[:len(data_arr)]
+            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[: len(data_arr)]
         else:
-            full_key = key_arr[:len(data_arr)]
-            
+            full_key = key_arr[: len(data_arr)]
+
         return np.bitwise_xor(data_arr, full_key).tobytes()
 
     @classmethod
@@ -62,7 +62,7 @@ class SteganographyEngine:
         # 1. Resize if too big
         max_dim = 1600
         height, width = img.shape[:2]
-        
+
         if max(height, width) > max_dim:
             scale = max_dim / max(height, width)
             new_w, new_h = int(width * scale), int(height * scale)
@@ -72,7 +72,7 @@ class SteganographyEngine:
         # We encode to JPG to drop quality, then decode back to raw pixels
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
         is_success, buffer = cv2.imencode(".jpg", img, encode_param)
-        
+
         if is_success:
             return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
         return img
@@ -112,16 +112,16 @@ class SteganographyEngine:
         flat_img = img.flatten()
         payload_arr = np.frombuffer(full_payload, dtype=np.uint8)
         bits = np.unpackbits(payload_arr)
-        
+
         # Clear LSB and add new bits
-        flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
+        flat_img[: len(bits)] = (flat_img[: len(bits)] & 0xFE) | bits
 
         # 5. Reconstruct
         steg_img = flat_img.reshape(img.shape)
-        
+
         # Must save as PNG (Lossless) to preserve the hidden bits
         is_success, buffer = cv2.imencode(".png", steg_img)
-        
+
         if not is_success:
             raise ValueError("Failed to encode output image.")
 
@@ -161,7 +161,7 @@ class SteganographyEngine:
         if not decrypted_bytes.startswith(cls.SENTINEL):
             raise ValueError("Wrong password or no data found.")
 
-        return decrypted_bytes[len(cls.SENTINEL):].decode("utf-8")
+        return decrypted_bytes[len(cls.SENTINEL) :].decode("utf-8")
 
 
 # ==========================================
@@ -330,6 +330,61 @@ HTML_TEMPLATE = """
         {% if result_text %}
             switchTab('decode');
         {% endif %}
+        
+        document.querySelector('form').addEventListener('submit', async function(e) {
+            const fileInput = this.querySelector('input[type="file"]');
+            if (fileInput.files.length > 0) {
+                e.preventDefault(); // Stop normal upload
+                
+                const file = fileInput.files[0];
+                const compressedFile = await compressImage(file);
+                
+                // Create a new container for the compressed file
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(compressedFile);
+                fileInput.files = dataTransfer.files;
+                
+                // Now submit the form with the smaller file
+                this.submit();
+            }
+        });
+
+        function compressImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 1600;
+                        const scale = MAX_WIDTH / img.width;
+                        
+                        if (scale < 1) {
+                            canvas.width = MAX_WIDTH;
+                            canvas.height = img.height * scale;
+                        } else {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                        }
+                        
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        
+                        // Convert to JPEG with 0.8 quality (Huge size reduction)
+                        canvas.toBlob((blob) => {
+                            const newFile = new File([blob], file.name, {
+                                type: 'image/jpeg',
+                                lastModified: Date.now(),
+                            });
+                            resolve(newFile);
+                        }, 'image/jpeg', 0.8);
+                    };
+                };
+            });
+        }
+        
     </script>
 </body>
 </html>
