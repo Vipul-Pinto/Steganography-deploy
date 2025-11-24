@@ -16,11 +16,12 @@ from flask_compress import Compress
 
 app = Flask(__name__)
 app.secret_key = "super_secret_stego_key"
-Compress(app) 
+Compress(app)
 
 # ==========================================
 #  BACKEND: ENCODING ONLY
 # ==========================================
+
 
 class SteganographyEngine:
     HEADER_SIZE = 4
@@ -32,23 +33,25 @@ class SteganographyEngine:
 
     @staticmethod
     def _xor_encrypt_decrypt(data_bytes, password):
-        if not password: return data_bytes
+        if not password:
+            return data_bytes
         key = SteganographyEngine._generate_key(password)
         key_len = len(key)
         data_arr = np.frombuffer(data_bytes, dtype=np.uint8)
         key_arr = np.frombuffer(key, dtype=np.uint8)
-        
+
         if len(data_arr) > key_len:
-            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[:len(data_arr)]
+            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[: len(data_arr)]
         else:
-            full_key = key_arr[:len(data_arr)]
+            full_key = key_arr[: len(data_arr)]
         return np.bitwise_xor(data_arr, full_key).tobytes()
 
     @classmethod
     def encode(cls, image_stream, text, password):
         file_bytes = np.frombuffer(image_stream.read(), np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        if img is None: raise ValueError("Could not decode image.")
+        if img is None:
+            raise ValueError("Could not decode image.")
 
         # Logic: 1. Payload -> 2. Header -> 3. Combine -> 4. Vectorized LSB
         text_bytes = cls.SENTINEL + text.encode("utf-8")
@@ -60,17 +63,21 @@ class SteganographyEngine:
         total_pixels = img.size
         required_bits = len(full_payload) * 8
         if required_bits > total_pixels:
-            raise ValueError(f"Text too long. Need {required_bits} pixels, have {total_pixels}.")
+            raise ValueError(
+                f"Text too long. Need {required_bits} pixels, have {total_pixels}."
+            )
 
         flat_img = img.flatten()
         payload_arr = np.frombuffer(full_payload, dtype=np.uint8)
         bits = np.unpackbits(payload_arr)
-        flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
-        
+        flat_img[: len(bits)] = (flat_img[: len(bits)] & 0xFE) | bits
+
         steg_img = flat_img.reshape(img.shape)
         is_success, buffer = cv2.imencode(".png", steg_img)
-        if not is_success: raise ValueError("Failed to encode.")
+        if not is_success:
+            raise ValueError("Failed to encode.")
         return io.BytesIO(buffer)
+
 
 # ==========================================
 #  FRONTEND: INCLUDES JS DECODER
@@ -122,7 +129,7 @@ HTML_TEMPLATE = """
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">1. Select Base Image</label>
-                        <input type="file" name="image" required accept="image/*" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
+                        <input type="file" name="image" required accept="image/*" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-emerald-400 hover:file:bg-gray-600 cursor-pointer border border-gray-600 rounded-lg p-2 bg-gray-800 focus:outline-none focus:border-emerald-500 transition-colors">
                     </div>
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">3. Password (Optional)</label>
@@ -144,15 +151,16 @@ HTML_TEMPLATE = """
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">1. Upload Encoded PNG</label>
-                        <input type="file" id="js-decode-file" accept="image/png" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
+                        <input type="file" id="js-decode-file" accept="image/png" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-blue-400 hover:file:bg-gray-600 cursor-pointer border border-gray-600 rounded-lg p-2 bg-gray-800 focus:outline-none focus:border-blue-500 transition-colors">
                     </div>
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">2. Password</label>
                         <input type="password" id="js-decode-pass" placeholder="Decryption Key" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
                     </div>
                 </div>
-                <button id="js-decode-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg">
-                    <i class="fas fa-eye mr-2"></i> Reveal Message (Instant)
+                <button id="js-decode-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg shadow-blue-900/50 transition-all transform hover:scale-[1.01] flex items-center justify-center group">
+                    <span>Reveal Message</span>
+                    <i class="fas fa-eye ml-2 group-hover:scale-110 transition-transform"></i>
                 </button>
             </div>
 
@@ -317,7 +325,7 @@ HTML_TEMPLATE = """
             errorBox.classList.remove('hidden');
         } finally {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-eye mr-2"></i> Reveal Message (Instant)';
+            btn.innerHTML = '<span>Reveal Message</span><i class="fas fa-eye ml-2 group-hover:scale-110 transition-transform"></i>';
         }
     });
     </script>
@@ -329,9 +337,11 @@ HTML_TEMPLATE = """
 #  ROUTES
 # ==========================================
 
+
 @app.route("/")
 def home():
     return render_template_string(HTML_TEMPLATE)
+
 
 @app.route("/steganography/encode", methods=["POST"])
 def encode_route():
@@ -342,13 +352,19 @@ def encode_route():
         file = request.files["image"]
         text = request.form["text"]
         password = request.form.get("password", "")
-        
+
         output = SteganographyEngine.encode(file, text, password)
         output.seek(0)
-        return send_file(output, mimetype="image/png", as_attachment=True, download_name="encoded_image.png")
+        return send_file(
+            output,
+            mimetype="image/png",
+            as_attachment=True,
+            download_name="encoded_image.png",
+        )
     except Exception as e:
         flash(f"Error: {str(e)}", "error")
         return redirect(url_for("home"))
+
 
 @app.route("/steganography/decode", methods=["POST"])
 def decode_route():
@@ -356,7 +372,9 @@ def decode_route():
     # This route just redirects home if accessed directly.
     return redirect(url_for("home"))
 
+
 if __name__ == "__main__":
     from waitress import serve
+
     print("🚀 Production Server Running on Port 5000")
-    serve(app, host="0.0.0.0", port=5000, threads=6)
+    serve(app, host="0.0.0.0", port=5050, threads=6)
