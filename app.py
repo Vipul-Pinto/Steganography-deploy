@@ -317,102 +317,144 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        function switchTab(tab) {
-            const encodeBtn = document.getElementById('btn-encode');
-            const decodeBtn = document.getElementById('btn-decode');
-            const encodePanel = document.getElementById('encode-panel');
-            const decodePanel = document.getElementById('decode-panel');
-
-            if(tab === 'encode') {
-                encodePanel.classList.remove('hidden');
-                decodePanel.classList.add('hidden');
-                encodeBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
-                encodeBtn.classList.remove('text-gray-400');
-                decodeBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
-                decodeBtn.classList.add('text-gray-400');
-            } else {
-                encodePanel.classList.add('hidden');
-                decodePanel.classList.remove('hidden');
-                decodeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
-                decodeBtn.classList.remove('text-gray-400');
-                encodeBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
-                encodeBtn.classList.add('text-gray-400');
-            }
+    // 1. UTILITY: Show Loading Spinner
+    function showLoader() {
+        const spinner = document.getElementById('loading-spinner');
+        const text = document.getElementById('loading-text');
+        
+        // Create these elements dynamically if they don't exist yet
+        if (!spinner) {
+            // (Optional: You can add the spinner HTML here via JS, 
+            // but relying on the HTML added in the previous step is cleaner)
+            return; 
         }
         
-        // Auto-switch to decode tab if result exists
-        {% if result_text %}
-            switchTab('decode');
-        {% endif %}
+        spinner.style.display = 'block';
+        text.classList.remove('hidden');
         
-        document.querySelector('form').addEventListener('submit', async function(e) {
+        // Disable all submit buttons to prevent double-clicks
+        document.querySelectorAll('button[type="submit"]').forEach(btn => {
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
+        });
+    }
+
+    // 2. LOGIC: Encode Form (WITH Compression)
+    const encodeForm = document.querySelector('#encode-panel form');
+    if (encodeForm) {
+        encodeForm.addEventListener('submit', async function(e) {
             const fileInput = this.querySelector('input[type="file"]');
+            
+            // Only compress if a file is selected
             if (fileInput.files.length > 0) {
-                e.preventDefault(); // Stop normal upload
+                e.preventDefault(); // Pause submission
+                showLoader(); // Show spinner immediately
                 
-                const file = fileInput.files[0];
-                const compressedFile = await compressImage(file);
-                
-                // Create a new container for the compressed file
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(compressedFile);
-                fileInput.files = dataTransfer.files;
-                
-                // Now submit the form with the smaller file
-                this.submit();
+                try {
+                    const file = fileInput.files[0];
+                    console.log("Original size:", file.size);
+                    
+                    const compressedFile = await compressImage(file);
+                    console.log("Compressed size:", compressedFile.size);
+                    
+                    // Swap the large file for the small one
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(compressedFile);
+                    fileInput.files = dataTransfer.files;
+                    
+                    // Resume submission with the optimized file
+                    this.submit();
+                } catch (error) {
+                    console.error("Compression failed, sending original:", error);
+                    this.submit(); // Fallback to original if compression fails
+                }
             }
         });
+    }
 
-        function compressImage(file) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.src = event.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 1600;
-                        const scale = MAX_WIDTH / img.width;
-                        
-                        if (scale < 1) {
-                            canvas.width = MAX_WIDTH;
-                            canvas.height = img.height * scale;
-                        } else {
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                        }
-                        
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                        
-                        // Convert to JPEG with 0.8 quality (Huge size reduction)
-                        canvas.toBlob((blob) => {
-                            const newFile = new File([blob], file.name, {
-                                type: 'image/jpeg',
-                                lastModified: Date.now(),
-                            });
-                            resolve(newFile);
-                        }, 'image/jpeg', 0.8);
-                    };
-                };
-            });
-        }
-        
-        function showLoader() {
-            document.getElementById('loading-spinner').style.display = 'block';
-            document.getElementById('loading-text').classList.remove('hidden');
-            // Disable button to prevent double clicks
-            document.querySelector('button[type="submit"]').disabled = true;
-            document.querySelector('button[type="submit"]').classList.add('opacity-50', 'cursor-not-allowed');
-        }
-
-        // Attach to forms
-        document.querySelectorAll('form').forEach(form => {
-            form.addEventListener('submit', showLoader);
+    // 3. LOGIC: Decode Form (NO Compression - Raw Upload)
+    const decodeForm = document.querySelector('#decode-panel form');
+    if (decodeForm) {
+        decodeForm.addEventListener('submit', function(e) {
+            // DO NOT preventDefault here (unless checking validation)
+            // DO NOT compress
+            showLoader(); // Just show visual feedback
         });
-        
-    </script>
+    }
+
+    // 4. HELPER: Image Compression Logic (Only used by Encode)
+    function compressImage(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 1600; // Resize huge 4K images
+                    const scale = MAX_WIDTH / img.width;
+                    
+                    if (scale < 1) {
+                        canvas.width = MAX_WIDTH;
+                        canvas.height = img.height * scale;
+                    } else {
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                    }
+                    
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // Convert to JPEG quality 0.8 to slash file size
+                    canvas.toBlob((blob) => {
+                        const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+                            type: 'image/jpeg',
+                            lastModified: Date.now(),
+                        });
+                        resolve(newFile);
+                    }, 'image/jpeg', 0.8);
+                };
+            };
+        });
+    }
+
+    // 5. UI: Tab Switching Logic
+    function clearResult() {
+        const resultArea = document.getElementById('result-area');
+        if (resultArea) resultArea.style.display = 'none';
+    }
+
+    function switchTab(tab) {
+        const encodeBtn = document.getElementById('btn-encode');
+        const decodeBtn = document.getElementById('btn-decode');
+        const encodePanel = document.getElementById('encode-panel');
+        const decodePanel = document.getElementById('decode-panel');
+
+        clearResult();
+
+        if(tab === 'encode') {
+            encodePanel.classList.remove('hidden');
+            decodePanel.classList.add('hidden');
+            encodeBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
+            encodeBtn.classList.remove('text-gray-400');
+            decodeBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+            decodeBtn.classList.add('text-gray-400');
+        } else {
+            encodePanel.classList.add('hidden');
+            decodePanel.classList.remove('hidden');
+            decodeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
+            decodeBtn.classList.remove('text-gray-400');
+            encodeBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
+            encodeBtn.classList.add('text-gray-400');
+        }
+    }
+    
+    {% if result_text %}
+        switchTab('decode');
+    {% endif %}
+</script>
 </body>
 </html>
 """
