@@ -12,22 +12,17 @@ from flask import (
     redirect,
     url_for,
 )
-from flask_compress import Compress  # OPTIMIZATION 1: Compresses the HTML sent to browser
+from flask_compress import Compress
 
 app = Flask(__name__)
 app.secret_key = "super_secret_stego_key"
-Compress(app)  # Initialize Compression
+Compress(app) 
 
 # ==========================================
-#  CORE STEGANOGRAPHY LOGIC
+#  BACKEND: ENCODING ONLY
 # ==========================================
 
 class SteganographyEngine:
-    """
-    High-Performance Steganography.
-    Optimized: Vectorized NumPy operations + Client-Side Compression.
-    """
-
     HEADER_SIZE = 4
     SENTINEL = b"##STEGO_CHECK##"
 
@@ -37,12 +32,9 @@ class SteganographyEngine:
 
     @staticmethod
     def _xor_encrypt_decrypt(data_bytes, password):
-        if not password:
-            return data_bytes
-        
+        if not password: return data_bytes
         key = SteganographyEngine._generate_key(password)
         key_len = len(key)
-        
         data_arr = np.frombuffer(data_bytes, dtype=np.uint8)
         key_arr = np.frombuffer(key, dtype=np.uint8)
         
@@ -50,96 +42,38 @@ class SteganographyEngine:
             full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[:len(data_arr)]
         else:
             full_key = key_arr[:len(data_arr)]
-            
         return np.bitwise_xor(data_arr, full_key).tobytes()
 
     @classmethod
     def encode(cls, image_stream, text, password):
-        # 1. Read Image
         file_bytes = np.frombuffer(image_stream.read(), np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if img is None: raise ValueError("Could not decode image.")
 
-        if img is None:
-            raise ValueError("Could not decode image.")
-
-        # NOTE: No server-side compression here. 
-        # We trust the JavaScript client to have already compressed it to JPG.
-
-        # 2. Prepare Payload
+        # Logic: 1. Payload -> 2. Header -> 3. Combine -> 4. Vectorized LSB
         text_bytes = cls.SENTINEL + text.encode("utf-8")
         encrypted_bytes = cls._xor_encrypt_decrypt(text_bytes, password)
-
         data_len = len(encrypted_bytes)
         header = struct.pack(">I", data_len)
         full_payload = header + encrypted_bytes
 
-        # 3. Check Capacity
         total_pixels = img.size
         required_bits = len(full_payload) * 8
-
         if required_bits > total_pixels:
-            raise ValueError(
-                f"Text is too long for this image. "
-                f"Need {required_bits} pixels, have {total_pixels}."
-            )
+            raise ValueError(f"Text too long. Need {required_bits} pixels, have {total_pixels}.")
 
-        # 4. Embed Bits (Vectorized)
         flat_img = img.flatten()
         payload_arr = np.frombuffer(full_payload, dtype=np.uint8)
         bits = np.unpackbits(payload_arr)
-        
-        # Clear LSB and add new bits
         flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
-
-        # 5. Reconstruct
+        
         steg_img = flat_img.reshape(img.shape)
-        
-        # Must save as PNG (Lossless)
         is_success, buffer = cv2.imencode(".png", steg_img)
-        
-        if not is_success:
-            raise ValueError("Failed to encode output image.")
-
+        if not is_success: raise ValueError("Failed to encode.")
         return io.BytesIO(buffer)
 
-    @classmethod
-    def decode(cls, image_stream, password):
-        file_bytes = np.frombuffer(image_stream.read(), np.uint8)
-        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
-        if img is None:
-            raise ValueError("Could not decode image.")
-
-        flat_img = img.flatten()
-
-        # Vectorized Header Extraction
-        header_bits = flat_img[:32] & 1
-        header_bytes = np.packbits(header_bits).tobytes()
-
-        try:
-            msg_length = struct.unpack(">I", header_bytes)[0]
-        except:
-            raise ValueError("Failed to retrieve header.")
-
-        if msg_length > len(flat_img) // 8:
-            raise ValueError("Detected message length is impossibly large.")
-
-        # Vectorized Payload Extraction
-        start = 32
-        end = 32 + (msg_length * 8)
-        payload_bits = flat_img[start:end] & 1
-        encrypted_bytes = np.packbits(payload_bits).tobytes()
-
-        decrypted_bytes = cls._xor_encrypt_decrypt(encrypted_bytes, password)
-
-        if not decrypted_bytes.startswith(cls.SENTINEL):
-            raise ValueError("Wrong password or no data found.")
-
-        return decrypted_bytes[len(cls.SENTINEL):].decode("utf-8")
-
-
 # ==========================================
-#  FRONTEND TEMPLATE (HTML/CSS/JS)
+#  FRONTEND: INCLUDES JS DECODER
 # ==========================================
 
 HTML_TEMPLATE = """
@@ -148,256 +82,251 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SteganoCrypt | Universal Image Steganography Tool</title>
+    <title>SteganoCrypt | Instant Client-Side Decode</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
         body { font-family: 'Inter', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        .glass {
-            background: rgba(17, 24, 39, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+        .glass { background: rgba(17, 24, 39, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
     </style>
 </head>
-<body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen text-gray-100 flex flex-col items-center py-10">
+<body class="bg-gray-900 min-h-screen text-gray-100 flex flex-col items-center py-10">
 
     <div class="text-center mb-10">
-        <h1 class="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 mb-2">
-            <i class="fas fa-user-secret mr-3 text-emerald-400"></i>SteganoCrypt
-        </h1>
-        <p class="text-gray-400">Securely hide text inside images using Bitwise LSB & XOR Encryption</p>
+        <h1 class="text-5xl font-bold text-emerald-400 mb-2"><i class="fas fa-user-secret mr-3"></i>SteganoCrypt</h1>
+        <p class="text-gray-400">Hybrid: Server Encoding & Instant Browser Decoding</p>
     </div>
 
     <div class="w-full max-w-4xl p-1">
-        
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             <div class="mb-6 space-y-2">
               {% for category, message in messages %}
-                <div class="p-4 rounded-lg border {{ 'bg-red-900/50 border-red-500/50 text-red-200' if category == 'error' else 'bg-emerald-900/50 border-emerald-500/50 text-emerald-200' }}">
-                    <i class="fas {{ 'fa-exclamation-circle' if category == 'error' else 'fa-check-circle' }} mr-2"></i> {{ message }}
+                <div class="p-4 rounded-lg border {{ 'bg-red-900/50 border-red-500 text-red-200' if category == 'error' else 'bg-emerald-900/50 border-emerald-500 text-emerald-200' }}">
+                    {{ message }}
                 </div>
               {% endfor %}
             </div>
           {% endif %}
         {% endwith %}
 
-        <div class="flex justify-center mb-8 bg-gray-800/50 p-1 rounded-xl max-w-md mx-auto border border-gray-700">
-            <button onclick="switchTab('encode')" id="btn-encode" class="flex-1 py-2 px-6 rounded-lg font-semibold transition-all bg-emerald-600 text-white shadow-lg shadow-emerald-900/50">
-                <i class="fas fa-lock mr-2"></i>Encode
-            </button>
-            <button onclick="switchTab('decode')" id="btn-decode" class="flex-1 py-2 px-6 rounded-lg font-semibold transition-all text-gray-400 hover:text-white">
-                <i class="fas fa-lock-open mr-2"></i>Decode
-            </button>
+        <div class="flex justify-center mb-8 bg-gray-800 p-1 rounded-xl max-w-md mx-auto border border-gray-700">
+            <button onclick="switchTab('encode')" id="btn-encode" class="flex-1 py-2 px-6 rounded-lg font-semibold bg-emerald-600 text-white">Encode</button>
+            <button onclick="switchTab('decode')" id="btn-decode" class="flex-1 py-2 px-6 rounded-lg font-semibold text-gray-400">Decode</button>
         </div>
 
         <div id="encode-panel" class="glass rounded-2xl p-8 shadow-2xl animate-fade-in">
             <form action="{{ url_for('encode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
-                
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">1. Select Base Image</label>
-                        <div class="relative group">
-                            <input type="file" name="image" required accept="image/*" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-emerald-400 hover:file:bg-gray-600 cursor-pointer border border-gray-600 rounded-lg p-2 bg-gray-800 focus:outline-none focus:border-emerald-500 transition-colors">
-                        </div>
-                        <p class="text-xs text-gray-500">Supports PNG, JPG, BMP. Output will be PNG.</p>
+                        <input type="file" name="image" required accept="image/*" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
                     </div>
-
                     <div class="space-y-2">
-                        <label class="block text-sm font-medium text-gray-300">3. Set Password (Optional)</label>
-                        <div class="relative">
-                            <i class="fas fa-key absolute left-3 top-3 text-gray-500"></i>
-                            <input type="password" name="password" placeholder="Encryption Key" class="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-10 pr-4 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all">
-                        </div>
+                        <label class="block text-sm font-medium text-gray-300">3. Password (Optional)</label>
+                        <input type="password" name="password" placeholder="Encryption Key" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
                     </div>
                 </div>
-
                 <div class="space-y-2">
-                    <label class="block text-sm font-medium text-gray-300">2. Enter Secret Message</label>
-                    <textarea name="text" required rows="5" placeholder="Type your secret message here... supports Emojis 🌍, Kanji 漢字, and standard text." class="w-full bg-gray-800 border border-gray-600 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 mono transition-all"></textarea>
+                    <label class="block text-sm font-medium text-gray-300">2. Secret Message</label>
+                    <textarea name="text" required rows="5" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-4 mono" placeholder="Message..."></textarea>
                 </div>
-
-                <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg shadow-emerald-900/50 transition-all transform hover:scale-[1.01] flex items-center justify-center group">
-                    <span>Encode & Download Image</span>
-                    <i class="fas fa-download ml-2 group-hover:translate-y-1 transition-transform"></i>
+                <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg">
+                    <i class="fas fa-download mr-2"></i> Encode & Download
                 </button>
             </form>
         </div>
 
         <div id="decode-panel" class="glass rounded-2xl p-8 shadow-2xl hidden">
-            <form action="{{ url_for('decode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
+            <div class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="space-y-2">
-                        <label class="block text-sm font-medium text-gray-300">1. Upload Encoded Image</label>
-                        <input type="file" name="image" required accept="image/png" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-blue-400 hover:file:bg-gray-600 cursor-pointer border border-gray-600 rounded-lg p-2 bg-gray-800 focus:outline-none focus:border-blue-500 transition-colors">
-                        <p class="text-xs text-yellow-500"><i class="fas fa-exclamation-triangle mr-1"></i>Must be the PNG generated by this tool.</p>
+                        <label class="block text-sm font-medium text-gray-300">1. Upload Encoded PNG</label>
+                        <input type="file" id="js-decode-file" accept="image/png" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
                     </div>
-
                     <div class="space-y-2">
-                        <label class="block text-sm font-medium text-gray-300">2. Enter Password</label>
-                        <div class="relative">
-                            <i class="fas fa-unlock absolute left-3 top-3 text-gray-500"></i>
-                            <input type="password" name="password" placeholder="Decryption Key" class="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-10 pr-4 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all">
-                        </div>
+                        <label class="block text-sm font-medium text-gray-300">2. Password</label>
+                        <input type="password" id="js-decode-pass" placeholder="Decryption Key" class="w-full bg-gray-800 border border-gray-600 rounded-lg p-2">
                     </div>
                 </div>
-
-                <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg shadow-blue-900/50 transition-all transform hover:scale-[1.01] flex items-center justify-center group">
-                    <span>Reveal Secret Message</span>
-                    <i class="fas fa-eye ml-2 group-hover:scale-110 transition-transform"></i>
+                <button id="js-decode-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg">
+                    <i class="fas fa-eye mr-2"></i> Reveal Message (Instant)
                 </button>
-            </form>
-
-            {% if result_text %}
-            <div id="result-area" class="mt-8 animate-fade-in-up">
-                <div class="flex justify-between items-end mb-2">
-                    <label class="block text-sm font-medium text-blue-400">Decoded Message:</label>
-                    <button onclick="clearResult()" class="text-xs text-gray-500 hover:text-red-400 transition-colors">
-                        <i class="fas fa-times mr-1"></i>Clear
-                    </button>
-                </div>
-                <div class="relative">
-                    <pre class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-emerald-400 mono whitespace-pre-wrap break-words overflow-x-hidden">{{ result_text }}</pre>
-                    <button onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent)" class="absolute top-2 right-2 text-gray-500 hover:text-white transition-colors p-2" title="Copy">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                </div>
             </div>
-            {% endif %}
-        </div>
 
+            <div id="js-result-area" class="mt-8 hidden">
+                <label class="block text-sm font-medium text-blue-400 mb-2">Decoded Message:</label>
+                <pre id="js-output" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-emerald-400 mono whitespace-pre-wrap break-words"></pre>
+            </div>
+            <div id="js-error" class="mt-4 p-4 bg-red-900/50 text-red-200 border border-red-500 rounded-lg hidden"></div>
+        </div>
     </div>
 
     <script>
-    // 1. UI: Tab Switching Logic
-    function clearResult() {
-        const resultArea = document.getElementById('result-area');
-        if (resultArea) resultArea.style.display = 'none';
-    }
-
+    // --- TABS ---
     function switchTab(tab) {
-        const encodeBtn = document.getElementById('btn-encode');
-        const decodeBtn = document.getElementById('btn-decode');
-        const encodePanel = document.getElementById('encode-panel');
-        const decodePanel = document.getElementById('decode-panel');
-
-        clearResult();
-
-        if(tab === 'encode') {
-            encodePanel.classList.remove('hidden');
-            decodePanel.classList.add('hidden');
-            encodeBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
-            encodeBtn.classList.remove('text-gray-400');
-            decodeBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
-            decodeBtn.classList.add('text-gray-400');
+        document.getElementById('encode-panel').classList.toggle('hidden', tab !== 'encode');
+        document.getElementById('decode-panel').classList.toggle('hidden', tab !== 'decode');
+        
+        // Update Buttons
+        const eBtn = document.getElementById('btn-encode');
+        const dBtn = document.getElementById('btn-decode');
+        if(tab === 'encode'){
+            eBtn.className = "flex-1 py-2 px-6 rounded-lg font-semibold bg-emerald-600 text-white";
+            dBtn.className = "flex-1 py-2 px-6 rounded-lg font-semibold text-gray-400";
         } else {
-            encodePanel.classList.add('hidden');
-            decodePanel.classList.remove('hidden');
-            decodeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
-            decodeBtn.classList.remove('text-gray-400');
-            encodeBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
-            encodeBtn.classList.add('text-gray-400');
+            dBtn.className = "flex-1 py-2 px-6 rounded-lg font-semibold bg-blue-600 text-white";
+            eBtn.className = "flex-1 py-2 px-6 rounded-lg font-semibold text-gray-400";
         }
     }
 
-    // 2. UTILITY: Show Loading Spinner ON THE BUTTON
-    function showLoader(activeForm) {
-        const btn = activeForm.querySelector('button[type="submit"]');
-        if (btn) {
-            btn.disabled = true;
-            btn.classList.add('opacity-75', 'cursor-not-allowed');
-            btn.dataset.originalText = btn.innerText;
-            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
-        }
-    }
-
-    // 3. LOGIC: Encode Form (WITH Client-Side Compression)
+    // --- CLIENT SIDE ENCODE OPTIMIZATION (Compress before upload) ---
     const encodeForm = document.querySelector('#encode-panel form');
-    if (encodeForm) {
-        encodeForm.addEventListener('submit', async function(e) {
-            const fileInput = this.querySelector('input[type="file"]');
+    encodeForm.addEventListener('submit', async function(e) {
+        const fileInput = this.querySelector('input[type="file"]');
+        if (fileInput.files.length > 0) {
+            e.preventDefault();
+            const btn = this.querySelector('button');
+            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Compressing & Uploading...';
+            btn.disabled = true;
             
-            if (fileInput.files.length > 0) {
-                e.preventDefault();
-                showLoader(this);
-                try {
-                    const file = fileInput.files[0];
-                    const compressedFile = await compressImage(file);
-                    
-                    const dataTransfer = new DataTransfer();
-                    dataTransfer.items.add(compressedFile);
-                    fileInput.files = dataTransfer.files;
-                    
-                    this.submit();
-                } catch (error) {
-                    console.error("Compression failed:", error);
-                    this.submit();
-                }
+            try {
+                // Compress image to JPG 80% locally
+                const file = fileInput.files[0];
+                const compressed = await compressImage(file);
+                const dt = new DataTransfer();
+                dt.items.add(compressed);
+                fileInput.files = dt.files;
+                this.submit();
+            } catch(err) {
+                this.submit(); // Fallback
             }
-        });
-    }
+        }
+    });
 
-    // 4. LOGIC: Decode Form (OPTIMIZATION 3: Fixed Timing)
-    const decodeForm = document.querySelector('#decode-panel form');
-    if (decodeForm) {
-        decodeForm.addEventListener('submit', function(e) {
-            // Using setTimeout allows the submit event to propagate BEFORE we disable the button
-            const form = this;
-            setTimeout(() => {
-                showLoader(form);
-            }, 10);
-        });
-    }
-
-    // 5. HELPER: Image Compression
     function compressImage(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
-            reader.onload = (event) => {
+            reader.onload = (e) => {
                 const img = new Image();
-                img.src = event.target.result;
+                img.src = e.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 1600;
-                    const scale = MAX_WIDTH / img.width;
-                    
-                    if (scale < 1) {
-                        canvas.width = MAX_WIDTH;
-                        canvas.height = img.height * scale;
-                    } else {
-                        canvas.width = img.width;
-                        canvas.height = img.height;
+                    const MAX = 1600;
+                    let w = img.width, h = img.height;
+                    if (w > MAX || h > MAX) {
+                        const scale = Math.min(MAX/w, MAX/h);
+                        w *= scale; h *= scale;
                     }
-                    
+                    canvas.width = w; canvas.height = h;
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
+                    ctx.drawImage(img, 0, 0, w, h);
                     canvas.toBlob((blob) => {
-                        const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
-                            type: 'image/jpeg',
-                            lastModified: Date.now(),
-                        });
-                        resolve(newFile);
+                        resolve(new File([blob], file.name.replace(/\..+$/, ".jpg"), { type: 'image/jpeg' }));
                     }, 'image/jpeg', 0.8);
                 };
             };
         });
     }
-    
-    {% if result_text %}
-        switchTab('decode');
-    {% endif %}
+
+    // --- CLIENT SIDE DECODING LOGIC (THE FIX) ---
+    document.getElementById('js-decode-btn').addEventListener('click', async function() {
+        const fileInput = document.getElementById('js-decode-file');
+        const passInput = document.getElementById('js-decode-pass');
+        const output = document.getElementById('js-output');
+        const errorBox = document.getElementById('js-error');
+        const resBox = document.getElementById('js-result-area');
+        const btn = this;
+
+        errorBox.classList.add('hidden');
+        resBox.classList.add('hidden');
+
+        if(!fileInput.files[0]) return alert("Please select an image");
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Decoding...';
+
+        try {
+            const file = fileInput.files[0];
+            const password = passInput.value;
+
+            // 1. Get Pixels
+            const imgBitmap = await createImageBitmap(file);
+            const canvas = document.createElement('canvas');
+            canvas.width = imgBitmap.width;
+            canvas.height = imgBitmap.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(imgBitmap, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data; // RGBA [r, g, b, a, r, g, b, a...]
+
+            // 2. Extract LSBs (Order: B, G, R to match Python OpenCV)
+            let bits = [];
+            for(let i=0; i<pixels.length; i+=4) {
+                // Python cv2 is BGR. JS is RGBA.
+                // Python Flatten: B, G, R, B, G, R...
+                // We must extract in that exact order.
+                bits.push(pixels[i+2] & 1); // Blue
+                bits.push(pixels[i+1] & 1); // Green
+                bits.push(pixels[i] & 1);   // Red
+            }
+
+            // 3. Reconstruct Bytes
+            // Helper: Convert bit array to integer
+            function getIntFromBits(start, count) {
+                let val = 0;
+                for(let k=0; k<count; k++) val = (val << 1) | bits[start+k];
+                return val;
+            }
+
+            // Read Header (32 bits)
+            let len = getIntFromBits(0, 32);
+            if(len <= 0 || len > pixels.length/8) throw new Error("No message found.");
+
+            // Read Payload
+            let payloadBytes = new Uint8Array(len);
+            for(let i=0; i<len; i++) {
+                payloadBytes[i] = getIntFromBits(32 + (i*8), 8);
+            }
+
+            // 4. Decrypt
+            let finalBytes = payloadBytes;
+            if(password) {
+                const enc = new TextEncoder();
+                const keyData = await crypto.subtle.digest('SHA-256', enc.encode(password));
+                const key = new Uint8Array(keyData);
+                finalBytes = new Uint8Array(len);
+                for(let i=0; i<len; i++) finalBytes[i] = payloadBytes[i] ^ key[i % key.length];
+            }
+
+            // 5. Verify Sentinel
+            const dec = new TextDecoder();
+            const fullText = dec.decode(finalBytes);
+            const sentinel = "##STEGO_CHECK##";
+            
+            if(!fullText.startsWith(sentinel)) throw new Error("Wrong password or invalid image.");
+
+            output.textContent = fullText.substring(sentinel.length);
+            resBox.classList.remove('hidden');
+
+        } catch(e) {
+            errorBox.textContent = e.message;
+            errorBox.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-eye mr-2"></i> Reveal Message (Instant)';
+        }
+    });
     </script>
 </body>
 </html>
 """
 
 # ==========================================
-#  FLASK ROUTES
+#  ROUTES
 # ==========================================
 
 @app.route("/")
@@ -406,45 +335,28 @@ def home():
 
 @app.route("/steganography/encode", methods=["POST"])
 def encode_route():
+    # Encoding is still Server-Side (Python) because we use smart compression there
     if "image" not in request.files or "text" not in request.form:
-        flash("Missing image or text.", "error")
         return redirect(url_for("home"))
-
-    file = request.files["image"]
-    text = request.form["text"]
-    password = request.form.get("password", "")
-
-    if file.filename == "":
-        flash("No selected file.", "error")
-        return redirect(url_for("home"))
-
     try:
-        output_stream = SteganographyEngine.encode(file, text, password)
-        output_stream.seek(0)
-        return send_file(output_stream, mimetype="image/png", as_attachment=True, download_name="encoded_image.png")
+        file = request.files["image"]
+        text = request.form["text"]
+        password = request.form.get("password", "")
+        
+        output = SteganographyEngine.encode(file, text, password)
+        output.seek(0)
+        return send_file(output, mimetype="image/png", as_attachment=True, download_name="encoded_image.png")
     except Exception as e:
-        flash(f"Encoding Error: {str(e)}", "error")
+        flash(f"Error: {str(e)}", "error")
         return redirect(url_for("home"))
 
 @app.route("/steganography/decode", methods=["POST"])
 def decode_route():
-    if "image" not in request.files:
-        flash("Please upload an image.", "error")
-        return redirect(url_for("home"))
-
-    file = request.files["image"]
-    password = request.form.get("password", "")
-
-    try:
-        decrypted_text = SteganographyEngine.decode(file, password)
-        return render_template_string(HTML_TEMPLATE, result_text=decrypted_text)
-    except Exception as e:
-        flash(f"Decoding Error: {str(e)}", "error")
-        return render_template_string(HTML_TEMPLATE)
+    # DEPRECATED: Decoding is now done in JavaScript.
+    # This route just redirects home if accessed directly.
+    return redirect(url_for("home"))
 
 if __name__ == "__main__":
     from waitress import serve
-    print("🚀 Starting Production Server on Port 5000...")
-    
-    # OPTIMIZATION 2: Increased limit to 128MB to fix "Decode not working" on large PNGs
-    serve(app, host="0.0.0.0", port=5000, threads=4, max_request_body_size=134217728)
+    print("🚀 Production Server Running on Port 5000")
+    serve(app, host="0.0.0.0", port=5000, threads=6)
