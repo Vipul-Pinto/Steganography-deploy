@@ -329,33 +329,23 @@ HTML_TEMPLATE = """
             // Inject Spinner HTML directly into the button
             btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Processing...';
         }
-    }
-
     // 3. LOGIC: Encode Form (WITH Client-Side Compression)
     const encodeForm = document.querySelector('#encode-panel form');
     if (encodeForm) {
         encodeForm.addEventListener('submit', async function(e) {
             const fileInput = this.querySelector('input[type="file"]');
-            
             if (fileInput.files.length > 0) {
-                e.preventDefault(); 
-                
-                // Show loader on THIS form
-                showLoader(this); 
-                
+                e.preventDefault();
+                showLoader(this);
                 try {
                     const file = fileInput.files[0];
-                    // Compress to JPG quality 0.8
                     const compressedFile = await compressImage(file);
-                    
                     const dataTransfer = new DataTransfer();
                     dataTransfer.items.add(compressedFile);
                     fileInput.files = dataTransfer.files;
-                    
-                    // Resume submission
                     this.submit();
                 } catch (error) {
-                    console.error("Compression failed, sending original:", error);
+                    console.error("Compression failed:", error);
                     this.submit();
                 }
             }
