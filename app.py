@@ -12,19 +12,20 @@ from flask import (
     redirect,
     url_for,
 )
+from flask_compress import Compress  # OPTIMIZATION: Compresses HTML/CSS
 
 app = Flask(__name__)
-app.secret_key = "super_secret_stego_key"  # Needed for flash messages
+app.secret_key = "super_secret_stego_key"
+Compress(app)  # Initialize Compression
 
 # ==========================================
 #  CORE STEGANOGRAPHY LOGIC
 # ==========================================
 
-
 class SteganographyEngine:
     """
-    High-Performance Steganography with Pre-Compression.
-    1. Compresses Input -> 2. Vectorized Encoding -> 3. Output PNG
+    High-Performance Steganography.
+    Optimized: Relies on Client-Side Compression for speed.
     """
 
     HEADER_SIZE = 4
@@ -38,44 +39,19 @@ class SteganographyEngine:
     def _xor_encrypt_decrypt(data_bytes, password):
         if not password:
             return data_bytes
-
+        
         key = SteganographyEngine._generate_key(password)
         key_len = len(key)
-
+        
         data_arr = np.frombuffer(data_bytes, dtype=np.uint8)
         key_arr = np.frombuffer(key, dtype=np.uint8)
-
+        
         if len(data_arr) > key_len:
-            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[: len(data_arr)]
+            full_key = np.tile(key_arr, (len(data_arr) // key_len) + 1)[:len(data_arr)]
         else:
-            full_key = key_arr[: len(data_arr)]
-
+            full_key = key_arr[:len(data_arr)]
+            
         return np.bitwise_xor(data_arr, full_key).tobytes()
-
-    @classmethod
-    def compress_image(cls, img):
-        """
-        Reduces image size BEFORE encoding to keep file size low.
-        1. Resize if larger than 1600px
-        2. Apply JPEG compression (Quality 85) in memory
-        """
-        # 1. Resize if too big
-        max_dim = 1600
-        height, width = img.shape[:2]
-
-        if max(height, width) > max_dim:
-            scale = max_dim / max(height, width)
-            new_w, new_h = int(width * scale), int(height * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        # 2. JPEG Compression (In-Memory)
-        # We encode to JPG to drop quality, then decode back to raw pixels
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
-        is_success, buffer = cv2.imencode(".jpg", img, encode_param)
-
-        if is_success:
-            return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-        return img
 
     @classmethod
     def encode(cls, image_stream, text, password):
@@ -86,9 +62,8 @@ class SteganographyEngine:
         if img is None:
             raise ValueError("Could not decode image.")
 
-        # --- NEW: COMPRESS FIRST ---
-        img = cls.compress_image(img)
-        # ---------------------------
+        # REMOVED: Backend Compression. 
+        # Reason: The JavaScript now handles this. Doing it twice wastes CPU.
 
         # 2. Prepare Payload
         text_bytes = cls.SENTINEL + text.encode("utf-8")
@@ -98,13 +73,13 @@ class SteganographyEngine:
         header = struct.pack(">I", data_len)
         full_payload = header + encrypted_bytes
 
-        # 3. Check Capacity (Checked AFTER compression)
+        # 3. Check Capacity
         total_pixels = img.size
         required_bits = len(full_payload) * 8
 
         if required_bits > total_pixels:
             raise ValueError(
-                f"Text is too long for this image (after compression). "
+                f"Text is too long for this image. "
                 f"Need {required_bits} pixels, have {total_pixels}."
             )
 
@@ -112,16 +87,16 @@ class SteganographyEngine:
         flat_img = img.flatten()
         payload_arr = np.frombuffer(full_payload, dtype=np.uint8)
         bits = np.unpackbits(payload_arr)
-
+        
         # Clear LSB and add new bits
-        flat_img[: len(bits)] = (flat_img[: len(bits)] & 0xFE) | bits
+        flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
 
         # 5. Reconstruct
         steg_img = flat_img.reshape(img.shape)
-
-        # Must save as PNG (Lossless) to preserve the hidden bits
+        
+        # Must save as PNG (Lossless)
         is_success, buffer = cv2.imencode(".png", steg_img)
-
+        
         if not is_success:
             raise ValueError("Failed to encode output image.")
 
@@ -129,7 +104,6 @@ class SteganographyEngine:
 
     @classmethod
     def decode(cls, image_stream, password):
-        # Decoding logic remains the exact same
         file_bytes = np.frombuffer(image_stream.read(), np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
@@ -161,7 +135,7 @@ class SteganographyEngine:
         if not decrypted_bytes.startswith(cls.SENTINEL):
             raise ValueError("Wrong password or no data found.")
 
-        return decrypted_bytes[len(cls.SENTINEL) :].decode("utf-8")
+        return decrypted_bytes[len(cls.SENTINEL):].decode("utf-8")
 
 
 # ==========================================
@@ -188,19 +162,18 @@ HTML_TEMPLATE = """
         }
         .loader {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #10b981; /* Emerald color */
+            border-top: 4px solid #10b981;
             border-radius: 50%;
             width: 30px;
             height: 30px;
             animation: spin 1s linear infinite;
-            display: none; /* Hidden by default */
+            display: none;
         }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }   
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }    
     </style>
 </head>
 <body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen text-gray-100 flex flex-col items-center py-10">
 
-    <!-- Header -->
     <div class="text-center mb-10">
         <h1 class="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 mb-2">
             <i class="fas fa-user-secret mr-3 text-emerald-400"></i>SteganoCrypt
@@ -208,10 +181,8 @@ HTML_TEMPLATE = """
         <p class="text-gray-400">Securely hide text inside images using Bitwise LSB & XOR Encryption</p>
     </div>
 
-    <!-- Main Container -->
     <div class="w-full max-w-4xl p-1">
         
-        <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             <div class="mb-6 space-y-2">
@@ -224,7 +195,6 @@ HTML_TEMPLATE = """
           {% endif %}
         {% endwith %}
 
-        <!-- Tabs -->
         <div class="flex justify-center mb-8 bg-gray-800/50 p-1 rounded-xl max-w-md mx-auto border border-gray-700">
             <button onclick="switchTab('encode')" id="btn-encode" class="flex-1 py-2 px-6 rounded-lg font-semibold transition-all bg-emerald-600 text-white shadow-lg shadow-emerald-900/50">
                 <i class="fas fa-lock mr-2"></i>Encode
@@ -234,12 +204,10 @@ HTML_TEMPLATE = """
             </button>
         </div>
 
-        <!-- Encode Section -->
         <div id="encode-panel" class="glass rounded-2xl p-8 shadow-2xl animate-fade-in">
             <form action="{{ url_for('encode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <!-- Image Input -->
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">1. Select Base Image</label>
                         <div class="relative group">
@@ -248,7 +216,6 @@ HTML_TEMPLATE = """
                         <p class="text-xs text-gray-500">Supports PNG, JPG, BMP. Output will be PNG.</p>
                     </div>
 
-                    <!-- Password -->
                     <div class="space-y-2">
                         <label class="block text-sm font-medium text-gray-300">3. Set Password (Optional)</label>
                         <div class="relative">
@@ -258,7 +225,6 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
 
-                <!-- Text Area -->
                 <div class="space-y-2">
                     <label class="block text-sm font-medium text-gray-300">2. Enter Secret Message</label>
                     <textarea name="text" required rows="5" placeholder="Type your secret message here... supports Emojis 🌍, Kanji 漢字, and standard text." class="w-full bg-gray-800 border border-gray-600 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 mono transition-all"></textarea>
@@ -275,7 +241,6 @@ HTML_TEMPLATE = """
             </form>
         </div>
 
-        <!-- Decode Section -->
         <div id="decode-panel" class="glass rounded-2xl p-8 shadow-2xl hidden">
             <form action="{{ url_for('decode_route') }}" method="post" enctype="multipart/form-data" class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -300,10 +265,14 @@ HTML_TEMPLATE = """
                 </button>
             </form>
 
-            <!-- Result Area -->
             {% if result_text %}
-            <div class="mt-8 animate-fade-in-up">
-                <label class="block text-sm font-medium text-blue-400 mb-2">Decoded Message:</label>
+            <div id="result-area" class="mt-8 animate-fade-in-up">
+                <div class="flex justify-between items-end mb-2">
+                    <label class="block text-sm font-medium text-blue-400">Decoded Message:</label>
+                    <button onclick="clearResult()" class="text-xs text-gray-500 hover:text-red-400 transition-colors">
+                        <i class="fas fa-times mr-1"></i>Clear
+                    </button>
+                </div>
                 <div class="relative">
                     <pre class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-emerald-400 mono whitespace-pre-wrap break-words overflow-x-hidden">{{ result_text }}</pre>
                     <button onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent)" class="absolute top-2 right-2 text-gray-500 hover:text-white transition-colors p-2" title="Copy">
@@ -317,22 +286,15 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-    // 1. UTILITY: Show Loading Spinner
     function showLoader() {
         const spinner = document.getElementById('loading-spinner');
         const text = document.getElementById('loading-text');
         
-        // Create these elements dynamically if they don't exist yet
-        if (!spinner) {
-            // (Optional: You can add the spinner HTML here via JS, 
-            // but relying on the HTML added in the previous step is cleaner)
-            return; 
-        }
+        if (!spinner) return; 
         
         spinner.style.display = 'block';
         text.classList.remove('hidden');
         
-        // Disable all submit buttons to prevent double-clicks
         document.querySelectorAll('button[type="submit"]').forEach(btn => {
             btn.disabled = true;
             btn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -340,50 +302,42 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 2. LOGIC: Encode Form (WITH Compression)
+    // LOGIC: Encode Form (WITH Client-Side Compression)
     const encodeForm = document.querySelector('#encode-panel form');
     if (encodeForm) {
         encodeForm.addEventListener('submit', async function(e) {
             const fileInput = this.querySelector('input[type="file"]');
             
-            // Only compress if a file is selected
             if (fileInput.files.length > 0) {
-                e.preventDefault(); // Pause submission
-                showLoader(); // Show spinner immediately
+                e.preventDefault(); 
+                showLoader(); 
                 
                 try {
                     const file = fileInput.files[0];
-                    console.log("Original size:", file.size);
-                    
+                    // Compress to JPG quality 0.8
                     const compressedFile = await compressImage(file);
-                    console.log("Compressed size:", compressedFile.size);
                     
-                    // Swap the large file for the small one
                     const dataTransfer = new DataTransfer();
                     dataTransfer.items.add(compressedFile);
                     fileInput.files = dataTransfer.files;
                     
-                    // Resume submission with the optimized file
                     this.submit();
                 } catch (error) {
                     console.error("Compression failed, sending original:", error);
-                    this.submit(); // Fallback to original if compression fails
+                    this.submit();
                 }
             }
         });
     }
 
-    // 3. LOGIC: Decode Form (NO Compression - Raw Upload)
+    // LOGIC: Decode Form (NO Compression)
     const decodeForm = document.querySelector('#decode-panel form');
     if (decodeForm) {
         decodeForm.addEventListener('submit', function(e) {
-            // DO NOT preventDefault here (unless checking validation)
-            // DO NOT compress
-            showLoader(); // Just show visual feedback
+            showLoader();
         });
     }
 
-    // 4. HELPER: Image Compression Logic (Only used by Encode)
     function compressImage(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -393,7 +347,7 @@ HTML_TEMPLATE = """
                 img.src = event.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 1600; // Resize huge 4K images
+                    const MAX_WIDTH = 1600;
                     const scale = MAX_WIDTH / img.width;
                     
                     if (scale < 1) {
@@ -407,7 +361,6 @@ HTML_TEMPLATE = """
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                     
-                    // Convert to JPEG quality 0.8 to slash file size
                     canvas.toBlob((blob) => {
                         const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
                             type: 'image/jpeg',
@@ -420,7 +373,6 @@ HTML_TEMPLATE = """
         });
     }
 
-    // 5. UI: Tab Switching Logic
     function clearResult() {
         const resultArea = document.getElementById('result-area');
         if (resultArea) resultArea.style.display = 'none';
@@ -454,7 +406,7 @@ HTML_TEMPLATE = """
     {% if result_text %}
         switchTab('decode');
     {% endif %}
-</script>
+    </script>
 </body>
 </html>
 """
@@ -463,11 +415,9 @@ HTML_TEMPLATE = """
 #  FLASK ROUTES
 # ==========================================
 
-
 @app.route("/")
 def home():
     return render_template_string(HTML_TEMPLATE)
-
 
 @app.route("/steganography/encode", methods=["POST"])
 def encode_route():
@@ -484,20 +434,12 @@ def encode_route():
         return redirect(url_for("home"))
 
     try:
-        # Process the image
         output_stream = SteganographyEngine.encode(file, text, password)
         output_stream.seek(0)
-
-        return send_file(
-            output_stream,
-            mimetype="image/png",
-            as_attachment=True,
-            download_name="encoded_image.png",
-        )
+        return send_file(output_stream, mimetype="image/png", as_attachment=True, download_name="encoded_image.png")
     except Exception as e:
         flash(f"Encoding Error: {str(e)}", "error")
         return redirect(url_for("home"))
-
 
 @app.route("/steganography/decode", methods=["POST"])
 def decode_route():
@@ -515,11 +457,7 @@ def decode_route():
         flash(f"Decoding Error: {str(e)}", "error")
         return render_template_string(HTML_TEMPLATE)
 
-
 if __name__ == "__main__":
     from waitress import serve
-
     print("🚀 Starting Production Server on Port 5000...")
-    # Threads=4 allows 4 people to use it at once
-    # Max request body size increased to 16MB to prevent connection drops on large images
     serve(app, host="0.0.0.0", port=5000, threads=4, max_request_body_size=16777216)
